@@ -142,6 +142,7 @@ Resources:
                   - !Ref CloudFrontOriginAccessIdentity
         Enabled: 'true'
         Comment: S3 bucket content
+        DefaultRootObject: index.html
         DefaultCacheBehavior:
           AllowedMethods:
             - GET
