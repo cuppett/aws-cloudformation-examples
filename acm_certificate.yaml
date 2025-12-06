@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: 'ACM Certificate for CloudFront - must be deployed in us-east-1'
+Parameters:
+  Name:
+    Description: >-
+      Is ultimately the leading moniker in the hostname (e.g. $name.example.com)
+    Type: String
+    Default: cdn
+  ResourceSuffix:
+    Description: >-
+      A LOWER CASE suffix for the certificate domain - this
+      allows multiple certificates to be created for different environments.
+    Type: String
+    MinLength: '0'
+    MaxLength: '255'
+    AllowedPattern: '[_a-z0-9-]*'
+    ConstraintDescription: contain only lower case alphanumeric characters.
+  DnsZone:
+    Description: >-
+      Amazon Route53 ZONE Name. This is the zone where a DNS record will be
+      created for the web app. The name should NOT end with a period.
+    Type: String
+    Default: example.com
+  HostedZoneId:
+    Description: >-
+      Amazon Route53 Hosted Zone ID. This is the zone where a DNS record will be
+      created for the verification of the certificate requested. It should match the
+      one from the DnsZone paramter.
+    Type: String
+Conditions:
+  HasResourceSuffix: !Not
+    - !Equals
+      - !Ref ResourceSuffix
+      - ''
+Resources:
+  AcmCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Join
+        - ''
+        - - !Ref Name
+          - !If
+            - HasResourceSuffix
+            - !Join
+              - ''
+              - - '-'
+                - !Ref ResourceSuffix
+            - !Ref 'AWS::NoValue'
+          - .
+          - !Ref DnsZone
+      DomainValidationOptions:
+        - DomainName: !Join
+          - ''
+          - - !Ref Name
+            - !If
+              - HasResourceSuffix
+              - !Join
+                - ''
+                - - '-'
+                  - !Ref ResourceSuffix
+              - !Ref 'AWS::NoValue'
+            - .
+            - !Ref DnsZone
+          HostedZoneId: !Ref HostedZoneId
+      ValidationMethod: DNS
+Outputs:
+  CertificateArn:
+    Description: ARN of the ACM Certificate (must be created in us-east-1 for CloudFront)
+    Value: !Ref AcmCertificate
+    Export:
+      Name: !Join
+        - '-'
+        - - !Ref 'AWS::StackName'
+          - CertificateArn

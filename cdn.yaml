@@ -26,12 +26,13 @@ Parameters:
       Amazon Route53 ZONE Name. This is the zone where a DNS record will be
       created for the web app. The name should NOT end with a period.
     Type: String
-    Default: brightframe.com
+    Default: example.com
   AcmCertificateArn:
     Description: >-
-      Amazon Certificate Manager ARN (us-east-1) used by CloudFront to protect this distribution
+      ARN of the ACM Certificate to use for CloudFront. This certificate MUST be
+      created in us-east-1 region (use the acm_certificate.yaml stack in us-east-1).
     Type: String
-    Default: arn:aws:acm:us-east-1:072298089782:certificate/5b495c6a-586b-4ca8-b87b-48b01784a3da
+    Default: 'arn:aws:acm:us-east-1:123456789012:certificate/00000000-0000-0000-0000-000000000000'
 Conditions:
   HasResourceSuffix: !Not
     - !Equals
