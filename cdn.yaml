@@ -1,10 +1,15 @@
 AWSTemplateFormatVersion: 2010-09-09
 Description: 'Content distribution template (S3 bucket, CloudFront distribution, etc.)'
 Parameters:
+  Name:
+    Description: >-
+      Is ultimately the leading moniker in the bucket and hostname (e.g. $name.example.com)
+    Type: String
+    Default: cdn
   Stage:
     Description: >-
-      Describes the stage for this environment (e.g
-      cdn-$stage-$region-$account[-$suffix]).
+      Describes the stage for this environment and is used in bucket name. (e.g
+      $name-$stage-$region-$account[-$suffix]).
     Type: String
     Default: master
   ResourceSuffix:
@@ -42,7 +47,7 @@ Resources:
               SSEAlgorithm: AES256
       BucketName: !Join
         - '-'
-        - - cdn
+        - - !Ref Name
           - !Ref Stage
           - !Ref 'AWS::Region'
           - !Ref 'AWS::AccountId'
@@ -110,7 +115,7 @@ Resources:
         Aliases:
           - !Join
             - ''
-            - - cdn
+            - - !Ref Name
               - !If
                 - HasResourceSuffix
                 - !Join
@@ -162,7 +167,7 @@ Resources:
           - .
       Name: !Join
         - ''
-        - - cdn
+        - - !Ref Name
           - !If
             - HasResourceSuffix
             - !Join
