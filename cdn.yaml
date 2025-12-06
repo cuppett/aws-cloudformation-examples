@@ -11,7 +11,7 @@ Parameters:
       Describes the stage for this environment and is used in bucket name. (e.g
       $name-$stage-$region-$account[-$suffix]).
     Type: String
-    Default: master
+    Default: main
   ResourceSuffix:
     Description: >-
       A LOWER CASE suffix for any resources created by this region script - this
