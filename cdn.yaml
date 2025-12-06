@@ -33,11 +33,22 @@ Parameters:
       created in us-east-1 region (use the acm_certificate.yaml stack in us-east-1).
     Type: String
     Default: 'arn:aws:acm:us-east-1:123456789012:certificate/00000000-0000-0000-0000-000000000000'
+  IncludeRootDomain:
+    Description: >-
+      Include root domain ({DnsZone}) as CloudFront alias with DNS records.
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
 Conditions:
   HasResourceSuffix: !Not
     - !Equals
       - !Ref ResourceSuffix
       - ''
+  IncludeRoot: !Equals
+    - !Ref IncludeRootDomain
+    - 'true'
 Resources:
   ContentBucket:
     Type: 'AWS::S3::Bucket'
@@ -126,6 +137,10 @@ Resources:
                 - !Ref 'AWS::NoValue'
               - .
               - !Ref DnsZone
+          - !If
+            - IncludeRoot
+            - !Ref DnsZone
+            - !Ref 'AWS::NoValue'
         Origins:
           - DomainName: !GetAtt
               - ContentBucket
@@ -205,6 +220,42 @@ Resources:
             - !Ref 'AWS::NoValue'
           - .
           - !Ref DnsZone
+          - .
+      Type: AAAA
+      AliasTarget:
+        HostedZoneId: Z2FDTNDATAQYW2
+        DNSName: !GetAtt
+          - ContentDistribution
+          - DomainName
+  RootCdnRecordset:
+    Type: 'AWS::Route53::RecordSet'
+    Condition: IncludeRoot
+    Properties:
+      HostedZoneName: !Join
+        - ''
+        - - !Ref DnsZone
+          - .
+      Name: !Join
+        - ''
+        - - !Ref DnsZone
+          - .
+      Type: A
+      AliasTarget:
+        HostedZoneId: Z2FDTNDATAQYW2
+        DNSName: !GetAtt
+          - ContentDistribution
+          - DomainName
+  RootCdnRecordsetIPv6:
+    Type: 'AWS::Route53::RecordSet'
+    Condition: IncludeRoot
+    Properties:
+      HostedZoneName: !Join
+        - ''
+        - - !Ref DnsZone
+          - .
+      Name: !Join
+        - ''
+        - - !Ref DnsZone
           - .
       Type: AAAA
       AliasTarget:

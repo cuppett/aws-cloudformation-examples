@@ -27,29 +27,45 @@ Parameters:
       created for the verification of the certificate requested. It should match the
       one from the DnsZone paramter.
     Type: String
+  CertificateMode:
+    Description: >-
+      Certificate mode: 'single' for {Name}.{DnsZone} (default),
+      'wildcard' for *.{DnsZone}
+    Type: String
+    Default: single
+    AllowedValues:
+      - single
+      - wildcard
+  IncludeRootDomain:
+    Description: >-
+      Include root domain ({DnsZone}) as Subject Alternative Name.
+      Useful to cover the bare domain alongside a subdomain or wildcard.
+    Type: String
+    Default: 'false'
+    AllowedValues:
+      - 'true'
+      - 'false'
 Conditions:
   HasResourceSuffix: !Not
     - !Equals
       - !Ref ResourceSuffix
       - ''
+  IsSingleMode: !Equals
+    - !Ref CertificateMode
+    - single
+  IsWildcardMode: !Equals
+    - !Ref CertificateMode
+    - wildcard
+  IncludeRoot: !Equals
+    - !Ref IncludeRootDomain
+    - 'true'
 Resources:
   AcmCertificate:
     Type: AWS::CertificateManager::Certificate
     Properties:
-      DomainName: !Join
-        - ''
-        - - !Ref Name
-          - !If
-            - HasResourceSuffix
-            - !Join
-              - ''
-              - - '-'
-                - !Ref ResourceSuffix
-            - !Ref 'AWS::NoValue'
-          - .
-          - !Ref DnsZone
-      DomainValidationOptions:
-        - DomainName: !Join
+      DomainName: !If
+        - IsSingleMode
+        - !Join
           - ''
           - - !Ref Name
             - !If
@@ -61,7 +77,39 @@ Resources:
               - !Ref 'AWS::NoValue'
             - .
             - !Ref DnsZone
+        - !Join
+          - ''
+          - - '*.'
+            - !Ref DnsZone
+      SubjectAlternativeNames: !If
+        - IncludeRoot
+        - - !Ref DnsZone
+        - !Ref 'AWS::NoValue'
+      DomainValidationOptions:
+        - DomainName: !If
+            - IsSingleMode
+            - !Join
+              - ''
+              - - !Ref Name
+                - !If
+                  - HasResourceSuffix
+                  - !Join
+                    - ''
+                    - - '-'
+                      - !Ref ResourceSuffix
+                  - !Ref 'AWS::NoValue'
+                - .
+                - !Ref DnsZone
+            - !Join
+              - ''
+              - - '*.'
+                - !Ref DnsZone
           HostedZoneId: !Ref HostedZoneId
+        - !If
+          - IncludeRoot
+          - DomainName: !Ref DnsZone
+            HostedZoneId: !Ref HostedZoneId
+          - !Ref 'AWS::NoValue'
       ValidationMethod: DNS
 Outputs:
   CertificateArn:
