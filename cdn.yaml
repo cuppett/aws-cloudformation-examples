@@ -129,7 +129,7 @@ Resources:
         Origins:
           - DomainName: !GetAtt
               - ContentBucket
-              - DomainName
+              - RegionalDomainName
             Id: !Join
               - '-'
               - - s3
