@@ -185,6 +185,32 @@ Resources:
         DNSName: !GetAtt
           - ContentDistribution
           - DomainName
+  CdnRecordsetIPv6:
+    Type: 'AWS::Route53::RecordSet'
+    Properties:
+      HostedZoneName: !Join
+        - ''
+        - - !Ref DnsZone
+          - .
+      Name: !Join
+        - ''
+        - - !Ref Name
+          - !If
+            - HasResourceSuffix
+            - !Join
+              - ''
+              - - '-'
+                - !Ref ResourceSuffix
+            - !Ref 'AWS::NoValue'
+          - .
+          - !Ref DnsZone
+          - .
+      Type: AAAA
+      AliasTarget:
+        HostedZoneId: Z2FDTNDATAQYW2
+        DNSName: !GetAtt
+          - ContentDistribution
+          - DomainName
 Outputs:
   ContentBucket:
     Description: Content S3 bucket name
