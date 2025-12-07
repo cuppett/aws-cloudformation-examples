@@ -22,6 +22,66 @@ Parameters:
     Default: 12
     Description: "Size of each subnet to create within the availability zones. (Min: 5 = /27, Max: 13 = /19)"
     Type: Number
+  EnableNatGateways:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: Create NAT gateways for private subnet internet access
+  EnableS3Endpoint:
+    Type: String
+    Default: 'true'
+    AllowedValues: ['true', 'false']
+    Description: Create S3 VPC Gateway Endpoint (free)
+  EnableDynamoDbEndpoint:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Create DynamoDB VPC Gateway Endpoint (free)
+  EnableSsmEndpoints:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Create SSM VPC endpoints for Session Manager (ssm, ec2messages, ssmmessages)
+  EnableLogsEndpoint:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Create CloudWatch Logs VPC endpoint
+  EnableKmsEndpoint:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Create KMS VPC endpoint
+  EnableStsEndpoint:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Create STS VPC endpoint
+  EnableSecretsManagerEndpoint:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Create Secrets Manager VPC endpoint
+  EnableSqsEndpoint:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Create SQS VPC endpoint
+  EnableSnsEndpoint:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Create SNS VPC endpoint
+  EnableMonitoringEndpoint:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Create CloudWatch Monitoring VPC endpoint
+  EnableEcrEndpoints:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['true', 'false']
+    Description: Create ECR VPC endpoints for container image pulling (ecr.api, ecr.dkr)
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -35,6 +95,36 @@ Metadata:
         default: "Availability Zones"
       Parameters:
       - AvailabilityZoneCount
+    - Label:
+        default: "Internet Access"
+      Parameters:
+      - EnableNatGateways
+    - Label:
+        default: "VPC Gateway Endpoints (Free)"
+      Parameters:
+      - EnableS3Endpoint
+      - EnableDynamoDbEndpoint
+    - Label:
+        default: "VPC Interface Endpoints - SSM Access"
+      Parameters:
+      - EnableSsmEndpoints
+    - Label:
+        default: "VPC Interface Endpoints - Core Services"
+      Parameters:
+      - EnableLogsEndpoint
+      - EnableKmsEndpoint
+      - EnableStsEndpoint
+      - EnableSecretsManagerEndpoint
+    - Label:
+        default: "VPC Interface Endpoints - Messaging"
+      Parameters:
+      - EnableSqsEndpoint
+      - EnableSnsEndpoint
+      - EnableMonitoringEndpoint
+    - Label:
+        default: "VPC Interface Endpoints - Containers"
+      Parameters:
+      - EnableEcrEndpoints
     ParameterLabels:
       AvailabilityZoneCount:
         default: "Availability Zone Count"
@@ -42,10 +132,48 @@ Metadata:
         default: "VPC CIDR"
       SubnetBits:
         default: "Bits Per Subnet"
+      EnableNatGateways:
+        default: "Enable NAT Gateways"
+      EnableS3Endpoint:
+        default: "Enable S3 Endpoint"
+      EnableDynamoDbEndpoint:
+        default: "Enable DynamoDB Endpoint"
+      EnableSsmEndpoints:
+        default: "Enable SSM Endpoints"
+      EnableLogsEndpoint:
+        default: "Enable CloudWatch Logs Endpoint"
+      EnableKmsEndpoint:
+        default: "Enable KMS Endpoint"
+      EnableStsEndpoint:
+        default: "Enable STS Endpoint"
+      EnableSecretsManagerEndpoint:
+        default: "Enable Secrets Manager Endpoint"
+      EnableSqsEndpoint:
+        default: "Enable SQS Endpoint"
+      EnableSnsEndpoint:
+        default: "Enable SNS Endpoint"
+      EnableMonitoringEndpoint:
+        default: "Enable CloudWatch Monitoring Endpoint"
+      EnableEcrEndpoints:
+        default: "Enable ECR Endpoints"
 
 Conditions:
   DoAz3: !Equals [3, !Ref AvailabilityZoneCount]
   DoAz2: !Or [!Equals [2, !Ref AvailabilityZoneCount], Condition: DoAz3]
+  DoNat: !Equals ['true', !Ref EnableNatGateways]
+  DoNatAz2: !And [Condition: DoAz2, Condition: DoNat]
+  DoNatAz3: !And [Condition: DoAz3, Condition: DoNat]
+  DoS3Endpoint: !Equals ['true', !Ref EnableS3Endpoint]
+  DoDynamoDbEndpoint: !Equals ['true', !Ref EnableDynamoDbEndpoint]
+  DoSsmEndpoints: !Equals ['true', !Ref EnableSsmEndpoints]
+  DoLogsEndpoint: !Equals ['true', !Ref EnableLogsEndpoint]
+  DoKmsEndpoint: !Equals ['true', !Ref EnableKmsEndpoint]
+  DoStsEndpoint: !Equals ['true', !Ref EnableStsEndpoint]
+  DoSecretsManagerEndpoint: !Equals ['true', !Ref EnableSecretsManagerEndpoint]
+  DoSqsEndpoint: !Equals ['true', !Ref EnableSqsEndpoint]
+  DoSnsEndpoint: !Equals ['true', !Ref EnableSnsEndpoint]
+  DoMonitoringEndpoint: !Equals ['true', !Ref EnableMonitoringEndpoint]
+  DoEcrEndpoints: !Equals ['true', !Ref EnableEcrEndpoints]
 
 Resources:
   VPC:
@@ -136,6 +264,7 @@ Resources:
     DependsOn:
     - GatewayToInternet
     Type: "AWS::EC2::NatGateway"
+    Condition: DoNat
     Properties:
       AllocationId:
         "Fn::GetAtt":
@@ -144,10 +273,12 @@ Resources:
       SubnetId: !Ref PublicSubnet
   EIP:
     Type: "AWS::EC2::EIP"
+    Condition: DoNat
     Properties:
       Domain: vpc
   Route:
     Type: "AWS::EC2::Route"
+    Condition: DoNat
     Properties:
       RouteTableId:
         Ref: PrivateRouteTable
@@ -178,7 +309,7 @@ Resources:
     DependsOn:
     - GatewayToInternet
     Type: "AWS::EC2::NatGateway"
-    Condition: DoAz2
+    Condition: DoNatAz2
     Properties:
       AllocationId:
         "Fn::GetAtt":
@@ -187,12 +318,12 @@ Resources:
       SubnetId: !Ref PublicSubnet2
   EIP2:
     Type: "AWS::EC2::EIP"
-    Condition: DoAz2
+    Condition: DoNatAz2
     Properties:
       Domain: vpc
   Route2:
     Type: "AWS::EC2::Route"
-    Condition: DoAz2
+    Condition: DoNatAz2
     Properties:
       RouteTableId:
         Ref: PrivateRouteTable2
@@ -223,7 +354,7 @@ Resources:
     DependsOn:
     - GatewayToInternet
     Type: "AWS::EC2::NatGateway"
-    Condition: DoAz3
+    Condition: DoNatAz3
     Properties:
       AllocationId:
         "Fn::GetAtt":
@@ -232,20 +363,31 @@ Resources:
       SubnetId: !Ref PublicSubnet3
   EIP3:
     Type: "AWS::EC2::EIP"
-    Condition: DoAz3
+    Condition: DoNatAz3
     Properties:
       Domain: vpc
   Route3:
     Type: "AWS::EC2::Route"
-    Condition: DoAz3
+    Condition: DoNatAz3
     Properties:
       RouteTableId:
         Ref: PrivateRouteTable3
       DestinationCidrBlock: 0.0.0.0/0
       NatGatewayId:
         Ref: NAT3
+  EndpointSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow HTTPS from VPC for VPC Endpoints
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+      - IpProtocol: tcp
+        FromPort: 443
+        ToPort: 443
+        CidrIp: !Ref VpcCidr
   S3Endpoint:
     Type: AWS::EC2::VPCEndpoint
+    Condition: DoS3Endpoint
     Properties:
       PolicyDocument:
         Version: 2012-10-17
@@ -267,6 +409,194 @@ Resources:
         - !Ref 'AWS::Region'
         - .s3
       VpcId: !Ref VPC
+  DynamoDbEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: DoDynamoDbEndpoint
+    Properties:
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal: '*'
+          Action:
+          - '*'
+          Resource:
+          - '*'
+      RouteTableIds:
+      - !Ref PublicRouteTable
+      - !Ref PrivateRouteTable
+      - !If [DoAz2, !Ref PrivateRouteTable2, !Ref "AWS::NoValue"]
+      - !If [DoAz3, !Ref PrivateRouteTable3, !Ref "AWS::NoValue"]
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.dynamodb
+      VpcId: !Ref VPC
+  SsmEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: DoSsmEndpoints
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ssm
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+      - !Ref PrivateSubnet
+      - !If [DoAz2, !Ref PrivateSubnet2, !Ref "AWS::NoValue"]
+      - !If [DoAz3, !Ref PrivateSubnet3, !Ref "AWS::NoValue"]
+      SecurityGroupIds:
+      - !Ref EndpointSecurityGroup
+  Ec2MessagesEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: DoSsmEndpoints
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ec2messages
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+      - !Ref PrivateSubnet
+      - !If [DoAz2, !Ref PrivateSubnet2, !Ref "AWS::NoValue"]
+      - !If [DoAz3, !Ref PrivateSubnet3, !Ref "AWS::NoValue"]
+      SecurityGroupIds:
+      - !Ref EndpointSecurityGroup
+  SsmMessagesEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: DoSsmEndpoints
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ssmmessages
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+      - !Ref PrivateSubnet
+      - !If [DoAz2, !Ref PrivateSubnet2, !Ref "AWS::NoValue"]
+      - !If [DoAz3, !Ref PrivateSubnet3, !Ref "AWS::NoValue"]
+      SecurityGroupIds:
+      - !Ref EndpointSecurityGroup
+  EcrApiEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: DoEcrEndpoints
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.api
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+      - !Ref PrivateSubnet
+      - !If [DoAz2, !Ref PrivateSubnet2, !Ref "AWS::NoValue"]
+      - !If [DoAz3, !Ref PrivateSubnet3, !Ref "AWS::NoValue"]
+      SecurityGroupIds:
+      - !Ref EndpointSecurityGroup
+  EcrDkrEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: DoEcrEndpoints
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.ecr.dkr
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+      - !Ref PrivateSubnet
+      - !If [DoAz2, !Ref PrivateSubnet2, !Ref "AWS::NoValue"]
+      - !If [DoAz3, !Ref PrivateSubnet3, !Ref "AWS::NoValue"]
+      SecurityGroupIds:
+      - !Ref EndpointSecurityGroup
+  LogsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: DoLogsEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.logs
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+      - !Ref PrivateSubnet
+      - !If [DoAz2, !Ref PrivateSubnet2, !Ref "AWS::NoValue"]
+      - !If [DoAz3, !Ref PrivateSubnet3, !Ref "AWS::NoValue"]
+      SecurityGroupIds:
+      - !Ref EndpointSecurityGroup
+  KmsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: DoKmsEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.kms
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+      - !Ref PrivateSubnet
+      - !If [DoAz2, !Ref PrivateSubnet2, !Ref "AWS::NoValue"]
+      - !If [DoAz3, !Ref PrivateSubnet3, !Ref "AWS::NoValue"]
+      SecurityGroupIds:
+      - !Ref EndpointSecurityGroup
+  StsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: DoStsEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.sts
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+      - !Ref PrivateSubnet
+      - !If [DoAz2, !Ref PrivateSubnet2, !Ref "AWS::NoValue"]
+      - !If [DoAz3, !Ref PrivateSubnet3, !Ref "AWS::NoValue"]
+      SecurityGroupIds:
+      - !Ref EndpointSecurityGroup
+  SecretsManagerEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: DoSecretsManagerEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.secretsmanager
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+      - !Ref PrivateSubnet
+      - !If [DoAz2, !Ref PrivateSubnet2, !Ref "AWS::NoValue"]
+      - !If [DoAz3, !Ref PrivateSubnet3, !Ref "AWS::NoValue"]
+      SecurityGroupIds:
+      - !Ref EndpointSecurityGroup
+  SqsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: DoSqsEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.sqs
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+      - !Ref PrivateSubnet
+      - !If [DoAz2, !Ref PrivateSubnet2, !Ref "AWS::NoValue"]
+      - !If [DoAz3, !Ref PrivateSubnet3, !Ref "AWS::NoValue"]
+      SecurityGroupIds:
+      - !Ref EndpointSecurityGroup
+  SnsEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: DoSnsEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.sns
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+      - !Ref PrivateSubnet
+      - !If [DoAz2, !Ref PrivateSubnet2, !Ref "AWS::NoValue"]
+      - !If [DoAz3, !Ref PrivateSubnet3, !Ref "AWS::NoValue"]
+      SecurityGroupIds:
+      - !Ref EndpointSecurityGroup
+  MonitoringEndpoint:
+    Type: AWS::EC2::VPCEndpoint
+    Condition: DoMonitoringEndpoint
+    Properties:
+      VpcId: !Ref VPC
+      ServiceName: !Sub com.amazonaws.${AWS::Region}.monitoring
+      VpcEndpointType: Interface
+      PrivateDnsEnabled: true
+      SubnetIds:
+      - !Ref PrivateSubnet
+      - !If [DoAz2, !Ref PrivateSubnet2, !Ref "AWS::NoValue"]
+      - !If [DoAz3, !Ref PrivateSubnet3, !Ref "AWS::NoValue"]
+      SecurityGroupIds:
+      - !Ref EndpointSecurityGroup
 
 Outputs:
   VpcId:

@@ -40,9 +40,15 @@ The templates have a specific deployment order due to dependencies:
 
 **VPC (vpc.yaml):**
 - Scalable design supporting 1-3 availability zones via `AvailabilityZoneCount` parameter
-- Uses conditions (`Has2AZ`, `Has3AZ`) to conditionally create resources
-- One NAT Gateway per AZ for high availability (incurs hourly charges)
-- S3 VPC Endpoint for private S3 access without internet gateway
+- Uses conditions (`DoAz2`, `DoAz3`, `DoNat`, `DoNatAz2`, `DoNatAz3`) to conditionally create resources
+- Optional NAT Gateways (one per AZ) controlled by `EnableNatGateways` parameter
+- Gateway VPC Endpoints (S3, DynamoDB) are free - attach to route tables
+- Interface VPC Endpoints for fully private architectures:
+  - SSM Session Manager (3 endpoints: ssm, ec2messages, ssmmessages)
+  - Container services (ECR API, ECR DKR)
+  - Core services (CloudWatch Logs, KMS, STS, Secrets Manager)
+  - Messaging (SQS, SNS, CloudWatch Monitoring)
+- Shared security group for all interface endpoints (HTTPS from VPC CIDR)
 
 ## Common Commands
 
@@ -87,12 +93,38 @@ aws cloudformation deploy \
 ### Deploy VPC
 
 ```bash
+# Standard VPC with NAT gateways
 aws cloudformation deploy \
   --template-file vpc.yaml \
   --stack-name my-vpc \
   --parameter-overrides \
-    CidrBlock=10.0.0.0/16 \
+    VpcCidr=10.0.0.0/16 \
     AvailabilityZoneCount=2
+
+# Fully private VPC with SSM access (no NAT gateways, no internet access)
+aws cloudformation deploy \
+  --template-file vpc.yaml \
+  --stack-name my-private-vpc \
+  --parameter-overrides \
+    VpcCidr=10.0.0.0/16 \
+    AvailabilityZoneCount=2 \
+    EnableNatGateways=false \
+    EnableSsmEndpoints=true \
+    EnableLogsEndpoint=true \
+    EnableKmsEndpoint=true
+
+# VPC for ECS/Fargate with ECR
+aws cloudformation deploy \
+  --template-file vpc.yaml \
+  --stack-name my-ecs-vpc \
+  --parameter-overrides \
+    VpcCidr=10.0.0.0/16 \
+    AvailabilityZoneCount=2 \
+    EnableNatGateways=false \
+    EnableS3Endpoint=true \
+    EnableEcrEndpoints=true \
+    EnableLogsEndpoint=true \
+    EnableSsmEndpoints=true
 ```
 
 ### Validate Templates
@@ -146,5 +178,8 @@ Local Claude permissions (`.claude/settings.local.json`) allow:
 2. The CloudFront distribution uses a `Retain` deletion policy - it will NOT be deleted when the stack is deleted
 3. All templates use AES256 server-side encryption for S3 buckets
 4. CloudFront enforces HTTPS-only with TLS 1.2 minimum
-5. NAT Gateways in VPC template incur hourly AWS charges
-6. S3 buckets use Origin Access Identity - they are NOT publicly accessible
+5. NAT Gateways incur hourly charges (~$0.045/hour per AZ)
+6. Gateway VPC Endpoints (S3, DynamoDB) are free
+7. Interface VPC Endpoints cost ~$0.01/hour per AZ plus data processing charges
+8. For fully private architectures: disable NAT gateways and enable SSM endpoints for instance access via Session Manager
+9. S3 buckets use Origin Access Identity - they are NOT publicly accessible

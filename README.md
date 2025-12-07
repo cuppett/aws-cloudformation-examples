@@ -43,18 +43,28 @@ Sets up a complete content delivery network with S3 origin, CloudFront distribut
 
 ### vpc.yaml
 
-Creates a production-ready VPC with configurable availability zones (1-3 AZs).
+Creates a production-ready VPC with configurable availability zones (1-3 AZs) and optional VPC endpoints for fully private architectures.
 
 **Key Features:**
 - Public and private subnets in each AZ
 - Internet Gateway for public subnet access
-- NAT Gateway per AZ for private subnet outbound access
-- S3 VPC Endpoint for private S3 access
-- Properly configured route tables
+- Optional NAT Gateways per AZ for private subnet outbound access
+- Optional VPC Gateway Endpoints (S3, DynamoDB) - free
+- Optional VPC Interface Endpoints for private AWS service access:
+  - SSM Session Manager (ssm, ec2messages, ssmmessages)
+  - Container services (ECR API, ECR DKR)
+  - Core services (CloudWatch Logs, KMS, STS, Secrets Manager)
+  - Messaging services (SQS, SNS, CloudWatch Monitoring)
+- Properly configured route tables and security groups
 
 **Important Parameters:**
-- `CidrBlock` - VPC CIDR block (default: `10.0.0.0/16`)
-- `AvailabilityZoneCount` - Number of AZs: 1, 2, or 3 (default: `2`)
+- `VpcCidr` - VPC CIDR block (default: `10.0.0.0/16`)
+- `AvailabilityZoneCount` - Number of AZs: 1, 2, or 3 (default: `1`)
+- `EnableNatGateways` - Create NAT gateways (default: `true`)
+- `EnableS3Endpoint` - S3 gateway endpoint (default: `true`)
+- `EnableSsmEndpoints` - SSM for Session Manager access (default: `false`)
+- `EnableEcrEndpoints` - ECR for container images (default: `false`)
+- Additional endpoint toggles for DynamoDB, Logs, KMS, STS, Secrets Manager, SQS, SNS, Monitoring
 
 ## Prerequisites
 
@@ -111,12 +121,25 @@ aws cloudformation deploy \
 If you need backend infrastructure, deploy the VPC stack:
 
 ```bash
+# Standard VPC with NAT gateways
 aws cloudformation deploy \
   --template-file vpc.yaml \
   --stack-name my-vpc \
   --parameter-overrides \
-    CidrBlock=10.0.0.0/16 \
+    VpcCidr=10.0.0.0/16 \
     AvailabilityZoneCount=2
+
+# Fully private VPC with SSM access (no NAT gateways)
+aws cloudformation deploy \
+  --template-file vpc.yaml \
+  --stack-name my-private-vpc \
+  --parameter-overrides \
+    VpcCidr=10.0.0.0/16 \
+    AvailabilityZoneCount=2 \
+    EnableNatGateways=false \
+    EnableSsmEndpoints=true \
+    EnableLogsEndpoint=true \
+    EnableKmsEndpoint=true
 ```
 
 ### 4. Upload Content
@@ -160,8 +183,21 @@ aws s3 sync ./my-website/ s3://$BUCKET_NAME/
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `CidrBlock` | String | `10.0.0.0/16` | VPC CIDR block |
-| `AvailabilityZoneCount` | Number | `2` | Number of AZs (1-3) |
+| `VpcCidr` | String | `10.0.0.0/16` | VPC CIDR block |
+| `AvailabilityZoneCount` | Number | `1` | Number of AZs (1-3) |
+| `SubnetBits` | Number | `12` | Subnet size bits (5-13) |
+| `EnableNatGateways` | String | `true` | Create NAT gateways |
+| `EnableS3Endpoint` | String | `true` | S3 gateway endpoint (free) |
+| `EnableDynamoDbEndpoint` | String | `false` | DynamoDB gateway endpoint (free) |
+| `EnableSsmEndpoints` | String | `false` | SSM endpoints for Session Manager |
+| `EnableEcrEndpoints` | String | `false` | ECR endpoints for containers |
+| `EnableLogsEndpoint` | String | `false` | CloudWatch Logs endpoint |
+| `EnableKmsEndpoint` | String | `false` | KMS endpoint |
+| `EnableStsEndpoint` | String | `false` | STS endpoint |
+| `EnableSecretsManagerEndpoint` | String | `false` | Secrets Manager endpoint |
+| `EnableSqsEndpoint` | String | `false` | SQS endpoint |
+| `EnableSnsEndpoint` | String | `false` | SNS endpoint |
+| `EnableMonitoringEndpoint` | String | `false` | CloudWatch Monitoring endpoint |
 
 ## Stack Outputs
 
@@ -187,5 +223,8 @@ aws s3 sync ./my-website/ s3://$BUCKET_NAME/
 - The CloudFront distribution has a `Retain` deletion policy to prevent accidental deletion
 - All S3 content is encrypted at rest with AES256
 - CloudFront uses Origin Access Identity - the S3 bucket is not publicly accessible
-- NAT Gateways in the VPC template incur hourly charges
+- NAT Gateways incur hourly charges (~$0.045/hour per AZ)
+- Gateway VPC Endpoints (S3, DynamoDB) are free
+- Interface VPC Endpoints cost ~$0.01/hour per AZ plus data processing charges
+- For fully private architectures, disable NAT gateways and enable SSM endpoints for instance access
 - DNS records are created automatically for configured domains
