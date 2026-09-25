@@ -15,6 +15,7 @@ The templates have a specific deployment order due to dependencies:
 1. **acm_certificate.yaml** - MUST be deployed in `us-east-1` region (CloudFront requirement)
 2. **cdn.yaml** - References the certificate ARN from step 1
 3. **vpc.yaml** - Optional, independent stack for backend infrastructure
+4. **bastion.yaml** - Optional, consumes a VPC (VpcId, PublicSubnet, and PrivateRouteTableIds for NAT mode). Needs `CAPABILITY_IAM CAPABILITY_AUTO_EXPAND` (uses the `AWS::LanguageExtensions` ForEach). To swap NAT gateways for the NAT instance: update vpc.yaml with `EnableNatGateways=false` first, then deploy bastion with `EnableNat=true`. Otherwise the route tables still have a default route and the route creation conflicts.
 
 ### Cross-Stack References
 
