@@ -1,0 +1,483 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::LanguageExtensions
+Description: >-
+  Bastion host with optional NAT instance mode (EC2 Instance, Security Group,
+  IAM role for SSM, optional Elastic IP and private subnet default routes).
+  Amazon Linux 2023 by default; dnf-automatic applies updates and reboots
+  when required.
+
+Parameters:
+  Name:
+    Type: String
+    Default: bastion
+    AllowedPattern: ^[a-zA-Z0-9-]{1,64}$
+    Description: Name tag applied to the instance and related resources
+  InstanceType:
+    Type: String
+    Default: t4g.small
+    Description: >-
+      Instance type. Graviton (arm64) types end their family in "g"
+      (t4g, m7g, m8g, c7g, c8g). The default AMI architecture is selected
+      automatically from the family.
+    AllowedValues:
+    # Burstable - Graviton2 (arm64)
+    - t4g.nano
+    - t4g.micro
+    - t4g.small
+    - t4g.medium
+    - t4g.large
+    - t4g.xlarge
+    - t4g.2xlarge
+    # Burstable - AMD EPYC (x86_64)
+    - t3a.nano
+    - t3a.micro
+    - t3a.small
+    - t3a.medium
+    - t3a.large
+    - t3a.xlarge
+    - t3a.2xlarge
+    # Burstable - Intel Xeon (x86_64)
+    - t3.nano
+    - t3.micro
+    - t3.small
+    - t3.medium
+    - t3.large
+    - t3.xlarge
+    - t3.2xlarge
+    # General purpose / compute - Graviton3/4 (arm64)
+    - m7g.medium
+    - m7g.large
+    - m7g.xlarge
+    - m8g.medium
+    - m8g.large
+    - m8g.xlarge
+    - c7g.medium
+    - c7g.large
+    - c7g.xlarge
+    - c8g.medium
+    - c8g.large
+    - c8g.xlarge
+    # General purpose / compute - x86_64
+    - m7i-flex.large
+    - m7i-flex.xlarge
+    - m7a.medium
+    - m7a.large
+    - m7a.xlarge
+    - m8a.medium
+    - m8a.large
+    - m8a.xlarge
+    - c7i-flex.large
+    - c7i-flex.xlarge
+  ImageId:
+    Type: String
+    Default: ""
+    AllowedPattern: ^$|^ami-[0-9a-f]{8,17}$
+    Description: >-
+      Optional AMI override (Fedora, CentOS Stream, RHEL, etc.; must support
+      cloud-init and dnf). Leave blank to use the latest Amazon Linux 2023
+      for the instance type's architecture.
+  LatestAmiArm64:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+    Description: SSM parameter for the default arm64 AMI (do not change normally)
+  LatestAmiX8664:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+    Description: SSM parameter for the default x86_64 AMI (do not change normally)
+  Username:
+    Type: String
+    Default: ""
+    AllowedPattern: ^$|^[a-z_][a-z0-9_-]{0,31}$
+    Description: >-
+      Optional additional user to create with sudo and SshPublicKey. Leave
+      blank to only use the AMI's default user (ec2-user on AL2023).
+  SshPublicKey:
+    Type: String
+    Default: ""
+    Description: >-
+      Optional SSH public key. Added to Username if set, otherwise to the
+      AMI default user.
+  KeyName:
+    Type: String
+    Default: ""
+    Description: Optional existing EC2 key pair name
+  AllowedSshCidr:
+    Type: String
+    Default: ""
+    AllowedPattern: ^$|^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|1[0-9]|2[0-9]|3[0-2]))$
+    ConstraintDescription: CIDR block parameter must be blank or in the form x.x.x.x/0-32
+    Description: >-
+      CIDR allowed to SSH to the bastion. Leave blank for no inbound SSH
+      (use SSM Session Manager instead).
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC to launch into
+  PublicSubnet:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet (route to an Internet Gateway) to launch into
+  AllocateElasticIp:
+    Type: String
+    Default: "true"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Attach an Elastic IP (stable address across instance replacement).
+      Costs the same as an auto-assigned public IPv4 while attached.
+  EnableNat:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: >-
+      Also act as a NAT instance for private subnets (disables
+      source/destination check, enables IP forwarding + masquerade).
+  VpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    AllowedPattern: ^(([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])\.){3}([0-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-5])(\/([0-9]|1[0-9]|2[0-9]|3[0-2]))$
+    Description: VPC CIDR allowed to send traffic through the NAT (NAT mode only)
+  PrivateRouteTableIds:
+    Type: CommaDelimitedList
+    Default: ""
+    Description: >-
+      Private route table IDs that get a 0.0.0.0/0 route to this instance
+      (NAT mode only). Tables must not already have a default route.
+  AutoUpdateType:
+    Type: String
+    Default: security
+    AllowedValues: ["security", "default"]
+    Description: >-
+      Updates dnf-automatic applies daily: "security" (security advisories
+      only) or "default" (all updates). Reboots automatically when needed.
+
+Mappings:
+  FamilyArch:
+    t4g: {Arch: arm64}
+    m7g: {Arch: arm64}
+    m8g: {Arch: arm64}
+    c7g: {Arch: arm64}
+    c8g: {Arch: arm64}
+    t3: {Arch: x86_64}
+    t3a: {Arch: x86_64}
+    m7i-flex: {Arch: x86_64}
+    m7a: {Arch: x86_64}
+    m8a: {Arch: x86_64}
+    c7i-flex: {Arch: x86_64}
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+    - Label:
+        default: "Host Information"
+      Parameters:
+      - Name
+      - InstanceType
+      - ImageId
+      - AutoUpdateType
+    - Label:
+        default: "Access"
+      Parameters:
+      - Username
+      - SshPublicKey
+      - KeyName
+      - AllowedSshCidr
+    - Label:
+        default: "Network Configuration"
+      Parameters:
+      - VpcId
+      - PublicSubnet
+      - AllocateElasticIp
+    - Label:
+        default: "NAT Instance"
+      Parameters:
+      - EnableNat
+      - VpcCidr
+      - PrivateRouteTableIds
+    - Label:
+        default: "Advanced"
+      Parameters:
+      - LatestAmiArm64
+      - LatestAmiX8664
+    ParameterLabels:
+      InstanceType:
+        default: "Instance Type"
+      ImageId:
+        default: "AMI Override"
+      AutoUpdateType:
+        default: "Automatic Update Type"
+      SshPublicKey:
+        default: "SSH Public Key"
+      KeyName:
+        default: "EC2 Key Pair"
+      AllowedSshCidr:
+        default: "Allowed SSH Source"
+      VpcId:
+        default: "VPC ID"
+      PublicSubnet:
+        default: "Public Subnet"
+      AllocateElasticIp:
+        default: "Allocate Elastic IP"
+      EnableNat:
+        default: "Enable NAT Instance Mode"
+      VpcCidr:
+        default: "VPC CIDR"
+      PrivateRouteTableIds:
+        default: "Private Route Table IDs"
+
+Conditions:
+  HasImageId: !Not [!Equals ["", !Ref ImageId]]
+  IsArm64: !Equals ["arm64", !FindInMap [FamilyArch, !Select [0, !Split [".", !Ref InstanceType]], Arch]]
+  HasUsername: !Not [!Equals ["", !Ref Username]]
+  HasSshKey: !Not [!Equals ["", !Ref SshPublicKey]]
+  HasUserAndKey: !And [Condition: HasUsername, Condition: HasSshKey]
+  HasDefaultUserKey: !And [Condition: HasSshKey, !Not [Condition: HasUsername]]
+  HasKeyName: !Not [!Equals ["", !Ref KeyName]]
+  HasSsh: !Not [!Equals ["", !Ref AllowedSshCidr]]
+  DoEip: !Equals ["true", !Ref AllocateElasticIp]
+  DoNat: !Equals ["true", !Ref EnableNat]
+  DoNatRoutes: !And
+  - Condition: DoNat
+  - !Not [!Equals ["", !Join ["", !Ref PrivateRouteTableIds]]]
+
+Resources:
+
+  BastionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service: ec2.amazonaws.com
+          Action: sts:AssumeRole
+      ManagedPolicyArns:
+      - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Tags:
+      - Key: Name
+        Value: !Ref Name
+
+  BastionInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+      - !Ref BastionRole
+
+  BastionSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: !Sub "${Name} bastion security group"
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+      - !If
+        - HasSsh
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref AllowedSshCidr
+          Description: SSH
+        - !Ref AWS::NoValue
+      - !If
+        - DoNat
+        - IpProtocol: "-1"
+          CidrIp: !Ref VpcCidr
+          Description: NAT traffic from the VPC
+        - !Ref AWS::NoValue
+      SecurityGroupEgress:
+      - IpProtocol: "-1"
+        CidrIp: 0.0.0.0/0
+        Description: All outbound
+      Tags:
+      - Key: Name
+        Value: !Ref Name
+
+  BastionInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !If
+      - HasImageId
+      - !Ref ImageId
+      - !If [IsArm64, !Ref LatestAmiArm64, !Ref LatestAmiX8664]
+      InstanceType: !Ref InstanceType
+      KeyName: !If [HasKeyName, !Ref KeyName, !Ref AWS::NoValue]
+      IamInstanceProfile: !Ref BastionInstanceProfile
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+        HttpPutResponseHopLimit: 2
+      BlockDeviceMappings:
+      - DeviceName: /dev/xvda
+        Ebs:
+          VolumeType: gp3
+          Encrypted: true
+          DeleteOnTermination: true
+      SourceDestCheck: !If [DoNat, false, true]
+      NetworkInterfaces:
+      - DeviceIndex: "0"
+        AssociatePublicIpAddress: !If [DoEip, false, true]
+        SubnetId: !Ref PublicSubnet
+        GroupSet:
+        - !Ref BastionSecurityGroup
+      Tags:
+      - Key: Name
+        Value: !Ref Name
+      UserData:
+        Fn::Base64: !Sub
+        - |
+          #cloud-config
+          package_update: true
+          package_upgrade: true
+          packages:
+          - dnf-automatic
+          - dnf-plugins-core
+          - nftables
+          ${UsersBlock}
+          write_files:
+          - path: /etc/dnf/automatic.conf
+            permissions: "0644"
+            defer: true
+            content: |
+              [commands]
+              upgrade_type = ${AutoUpdateType}
+              random_sleep = 0
+              network_online_timeout = 60
+              download_updates = yes
+              apply_updates = yes
+              reboot = when-needed
+              reboot_command = "shutdown -r +5 'Rebooting after applying package updates'"
+              [emitters]
+              emit_via = stdio
+              [base]
+              debuglevel = 1
+          # dnf4 dnf-automatic (AL2023 / RHEL 9) silently ignores reboot = when-needed,
+          # so always check after each run and schedule a reboot if core packages
+          # (kernel, glibc, systemd, openssl, ...) changed since boot.
+          - path: /usr/local/sbin/dnf-automatic-reboot-check
+            permissions: "0755"
+            content: |
+              #!/bin/bash
+              # needs-restarting only knows the package named "kernel"; AL2023
+              # ships versioned names (kernel6.1, kernel6.18, ...). Register the
+              # running kernel's real package name so kernel updates count.
+              KPKG=$(rpm -qf --qf '%{NAME}\n' "/boot/vmlinuz-$(uname -r)" 2>/dev/null | head -1)
+              if [ -n "$KPKG" ]; then
+                mkdir -p /etc/dnf/plugins/needs-restarting.d
+                echo "$KPKG" > /etc/dnf/plugins/needs-restarting.d/running-kernel.conf
+              fi
+              if ! dnf -q needs-restarting -r >/dev/null 2>&1; then
+                logger -t dnf-automatic "core packages updated; rebooting in 5 minutes"
+                shutdown -r +5 "Rebooting after applying package updates"
+              fi
+              exit 0
+          - path: /etc/systemd/system/dnf-automatic.service.d/10-reboot-check.conf
+            permissions: "0644"
+            content: |
+              [Service]
+              ExecStartPost=/usr/local/sbin/dnf-automatic-reboot-check
+          - path: /usr/local/sbin/nat-instance-setup
+            permissions: "0755"
+            content: |
+              #!/bin/bash
+              set -euo pipefail
+              IMDS=http://169.254.169.254/latest
+              TOKEN=$(curl -sfS -X PUT "$IMDS/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+              md() { curl -sfS -H "X-aws-ec2-metadata-token: $TOKEN" "$IMDS/meta-data/$1"; }
+              MAC=$(md mac)
+              CIDRS=$(md "network/interfaces/macs/$MAC/vpc-ipv4-cidr-blocks" | paste -sd, -)
+              IFACE=$(ip -o route show default | awk '{for (i=1; i<NF; i++) if ($i == "dev") {print $(i+1); exit}}')
+              sysctl -q -w net.ipv4.ip_forward=1
+              sysctl -q -w net.ipv4.conf.all.send_redirects=0
+              sysctl -q -w "net.ipv4.conf.$IFACE.send_redirects=0"
+              nft -f - <<EOF
+              table ip nat_instance
+              delete table ip nat_instance
+              table ip nat_instance {
+                chain postrouting {
+                  type nat hook postrouting priority srcnat; policy accept;
+                  oifname "$IFACE" ip saddr { $CIDRS } ip daddr != { $CIDRS } masquerade
+                }
+              }
+              EOF
+              logger -t nat-instance "NAT enabled on $IFACE for $CIDRS"
+          - path: /etc/systemd/system/nat-instance.service
+            permissions: "0644"
+            content: |
+              [Unit]
+              Description=Configure NAT instance forwarding and masquerade
+              Wants=network-online.target
+              After=network-online.target
+              [Service]
+              Type=oneshot
+              RemainAfterExit=yes
+              ExecStart=/usr/local/sbin/nat-instance-setup
+              [Install]
+              WantedBy=multi-user.target
+          runcmd:
+          # Amazon Linux 2023 locks dnf to the AMI's release; track latest so
+          # dnf-automatic actually picks up new security advisories.
+          - [bash, -c, "if grep -q '^ID=\"amzn\"' /etc/os-release; then echo latest > /etc/dnf/vars/releasever; fi"]
+          - [systemctl, daemon-reload]
+          - [bash, -c, "systemctl enable --now dnf-automatic.timer || systemctl enable --now dnf5-automatic.timer"]
+          - [bash, -c, "if [ '${EnableNat}' = 'true' ]; then systemctl enable --now nat-instance.service; fi"]
+          # Reboot once at the end of first boot if the initial upgrade needs it
+          - [/usr/local/sbin/dnf-automatic-reboot-check]
+        - UsersBlock: !If
+          - HasUsername
+          - !Join
+            - ""
+            - - "users:\n"
+              - "- default\n"
+              - !Sub "- name: ${Username}\n"
+              - "  groups: [wheel]\n"
+              - "  sudo: ALL=(ALL) NOPASSWD:ALL\n"
+              - "  shell: /bin/bash\n"
+              - !If
+                - HasUserAndKey
+                - !Sub "  ssh_authorized_keys:\n  - ${SshPublicKey}\n"
+                - ""
+          - !If
+            - HasDefaultUserKey
+            - !Sub "ssh_authorized_keys:\n- ${SshPublicKey}\n"
+            - ""
+
+  BastionEip:
+    Type: AWS::EC2::EIP
+    Condition: DoEip
+    Properties:
+      Domain: vpc
+      Tags:
+      - Key: Name
+        Value: !Ref Name
+
+  BastionEipAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Condition: DoEip
+    Properties:
+      AllocationId: !GetAtt BastionEip.AllocationId
+      InstanceId: !Ref BastionInstance
+
+  Fn::ForEach::NatRoutes:
+  - RouteTableId
+  - !Ref PrivateRouteTableIds
+  - NatRoute&{RouteTableId}:
+      Type: AWS::EC2::Route
+      Condition: DoNatRoutes
+      Properties:
+        RouteTableId: !Ref RouteTableId
+        DestinationCidrBlock: 0.0.0.0/0
+        InstanceId: !Ref BastionInstance
+
+Outputs:
+  BastionInstanceId:
+    Description: Bastion instance ID
+    Value: !Ref BastionInstance
+  BastionPublicIp:
+    Description: Bastion public IP address (Elastic IP when allocated)
+    Value: !If [DoEip, !Ref BastionEip, !GetAtt BastionInstance.PublicIp]
+  BastionPrivateIp:
+    Description: Bastion private IP address
+    Value: !GetAtt BastionInstance.PrivateIp
+  BastionSecurityGroupId:
+    Description: Bastion security group ID
+    Value: !Ref BastionSecurityGroup
+  SsmSessionCommand:
+    Description: Connect via SSM Session Manager
+    Value: !Sub "aws ssm start-session --region ${AWS::Region} --target ${BastionInstance}"
