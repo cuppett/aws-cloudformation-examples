@@ -17,7 +17,7 @@ Parameters:
     Default: t4g.small
     Description: >-
       Instance type. Graviton (arm64) types end their family in "g"
-      (t4g, m7g, m8g, c7g, c8g). The default AMI architecture is selected
+      (t4g, m7g, m8g, c7g, c8g); everything else is x86_64. The default AMI architecture is selected
       automatically from the family.
     AllowedValues:
     # Burstable - Graviton2 (arm64)
@@ -36,6 +36,11 @@ Parameters:
     - t3a.large
     - t3a.xlarge
     - t3a.2xlarge
+    # Burstable - Intel Xeon 6 (x86_64); only nano-medium offered so far
+    - t8i.nano
+    - t8i.micro
+    - t8i.small
+    - t8i.medium
     # Burstable - Intel Xeon (x86_64)
     - t3.nano
     - t3.micro
@@ -155,6 +160,7 @@ Mappings:
     m8g: {Arch: arm64}
     c7g: {Arch: arm64}
     c8g: {Arch: arm64}
+    t8i: {Arch: x86_64}
     t3: {Arch: x86_64}
     t3a: {Arch: x86_64}
     m7i-flex: {Arch: x86_64}
